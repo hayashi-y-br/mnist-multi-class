@@ -11,9 +11,9 @@ class Attention(nn.Module):
         self.ATTENTION_BRANCHES = 1
 
         self.feature_extractor_part1 = nn.Sequential(
-            nn.Conv2d(1, 20, kernel_size=5),
+            nn.Conv2d(1, 20, kernel_size=3), # nn.Conv2d(1, 20, kernel_size=5),
             nn.ReLU(),
-            nn.MaxPool2d(2, stride=2),
+            # nn.MaxPool2d(2, stride=2),
             nn.Conv2d(20, 50, kernel_size=5),
             nn.ReLU(),
             nn.MaxPool2d(2, stride=2)
@@ -31,8 +31,8 @@ class Attention(nn.Module):
         )
 
         self.classifier = nn.Sequential(
-            nn.Linear(self.M*self.ATTENTION_BRANCHES, 1),
-            nn.Sigmoid()
+            nn.Linear(self.M*self.ATTENTION_BRANCHES, 10),
+            nn.Softmax(dim=1)
         )
 
     def forward(self, x):
@@ -49,7 +49,7 @@ class Attention(nn.Module):
         Z = torch.mm(A, H)  # ATTENTION_BRANCHESxM
 
         Y_prob = self.classifier(Z)
-        Y_hat = torch.ge(Y_prob, 0.5).float()
+        Y_hat = torch.argmax(Y_prob).float()
 
         return Y_prob, Y_hat, A
 
