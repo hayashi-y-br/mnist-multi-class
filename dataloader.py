@@ -23,7 +23,8 @@ class MnistBags(data_utils.Dataset):
             )
 
     def __len__(self):
-        return self.dataset.__len__()
+        return 250
+        # return self.dataset.__len__()
 
     def __getitem__(self, idx):
         return self.dataset.__getitem__(idx)
