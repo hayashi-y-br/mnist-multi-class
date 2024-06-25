@@ -4,13 +4,14 @@ import argparse
 
 import numpy as np
 import torch
+import torchvision.utils
 import torch.optim as optim
 import torch.utils.data as data_utils
 from torch.autograd import Variable
 import matplotlib.pyplot as plt
 
 from dataloader import MnistBags
-from model import Attention, GatedAttention
+from model import Attention
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch MNIST bags Example')
@@ -35,6 +36,7 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--model', type=str, default='attention', help='Choose b/w attention and gated_attention')
+parser.add_argument('--batch_size', type=int, default=1, help='batch_size')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -48,7 +50,7 @@ print('Load Train and Test Set')
 loader_kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
 
 train_loader = data_utils.DataLoader(MnistBags(train=True),
-                                     batch_size=1,
+                                     batch_size=args.batch_size,
                                      shuffle=True,
                                      **loader_kwargs)
 
@@ -60,8 +62,6 @@ test_loader = data_utils.DataLoader(MnistBags(train=False),
 print('Init Model')
 if args.model=='attention':
     model = Attention()
-elif args.model=='gated_attention':
-    model = GatedAttention()
 if args.cuda:
     model.cuda()
 
@@ -73,29 +73,36 @@ def train(epoch):
     train_loss = 0.
     train_error = 0.
     loss_fn = torch.nn.CrossEntropyLoss()
-    for batch_idx, (data, bag_label) in enumerate(train_loader):
+    for i, (X_batch, y_batch) in enumerate(train_loader):
         if args.cuda:
-            data, bag_label = data.cuda(), bag_label.cuda()
-        data, bag_label = Variable(data), Variable(bag_label)
-        # reset gradients
+            X_batch, y_batch = X_batch.cuda(), y_batch.cuda()
+        X_batch, y_batch = Variable(X_batch), Variable(y_batch)
+
         optimizer.zero_grad()
-        # calculate loss and metrics
-        # loss, _ = model.calculate_objective(data, bag_label)
-        Y_prob, _, _ = model(data)
-        loss = loss_fn(Y_prob, bag_label)
-        train_loss += loss.detach().mean()
-        error, _ = model.calculate_classification_error(data, bag_label)
-        train_error += error
-        # backward pass
+
+        y_proba_list = []
+        y_hat_list = []
+        for j, (X, y) in enumerate(zip(X_batch, y_batch)):
+            X = X.unsqueeze(0)
+            y = y.unsqueeze(0)
+            y_proba, y_hat, _ = model(X)
+            y_proba_list.append(y_proba)
+            y_hat_list.append(y_hat)
+        y_proba = torch.cat(y_proba_list, dim=0)
+        y_hat = torch.cat(y_hat_list, dim=0)
+
+        loss = loss_fn(y_proba, y_batch)
         loss.backward()
-        # step
+
         optimizer.step()
 
-    # calculate loss and error for epoch
+        train_loss += loss.detach().cpu().item()
+        train_error += 1. - (y_hat == y_batch).detach().cpu().count_nonzero().item() / args.batch_size
+
     train_loss /= len(train_loader)
     train_error /= len(train_loader)
 
-    print('Epoch: {}, Loss: {:.4f}, Train error: {:.4f}'.format(epoch, train_loss.cpu().float(), train_error))
+    print('Epoch: {:2d}, Loss: {:.4f}, Train error: {:.4f}'.format(epoch, train_loss, train_error))
 
 
 def test():
@@ -103,49 +110,45 @@ def test():
     test_loss = 0.
     test_error = 0.
     loss_fn = torch.nn.CrossEntropyLoss()
-    cnt = 0
-    ac = 0
-    wa = 0
-    with torch.no_grad():
-        for batch_idx, (data, bag_label) in enumerate(test_loader):
-            if args.cuda:
-                data, bag_label = data.cuda(), bag_label.cuda()
-            data, bag_label = Variable(data), Variable(bag_label)
-            Y_prob, Y_hat, attention_weights = model(data)
-            loss = loss_fn(Y_prob, bag_label)
-            test_loss += loss.detach().mean()
-            error, predicted_label = model.calculate_classification_error(data, bag_label)
-            test_error += error
-            cnt += 1
-            if predicted_label.cpu().detach() == bag_label.cpu().detach().numpy()[0]:
-                ac += 1
-            else:
-                wa += 1
 
-            if batch_idx < 100:  # plot bag labels and instance labels for first 10 bags
-                bag_level =  (bag_label.cpu().detach().numpy()[0], int(predicted_label.cpu().detach()))
-                instance_level = ['{:.4f}'.format(x) for x in attention_weights.cpu().data.numpy()[0]]
-                print('\nTrue Bag Label, Predicted Bag Label: {}\n'
-                    'True Instance Labels, Attention Weights: {}'.format(bag_level, instance_level))
-                fig, axs = plt.subplots(2, 2, figsize=(5, 5))
-                fig.suptitle('{}'.format(predicted_label.cpu().detach()))
-                fig.subplots_adjust(hspace=0, wspace=0)
-                for j in range(4):
-                    axs[j//2, j%2].axis('off')
-                    axs[j//2, j%2].imshow(torch.permute(data[0][j], (1, 2, 0)) / 2 + 0.5, alpha=0.5)
-                    xlim = axs[j//2, j%2].get_xlim()
-                    ylim = axs[j//2, j%2].get_ylim()
-                    # axs[j//2, j%2].imshow([[attention_weights.cpu().detach().float()[0][j]]], cmap='bwr', vmin=0, vmax=1, alpha=0.5, extent=[*xlim, *ylim])
-                    axs[j//2, j%2].imshow([[attention_weights.cpu().detach().float()[0][j]]], cmap='bwr',
-                                          vmin=attention_weights.cpu().detach().float()[0].min(),
-                                          vmax=attention_weights.cpu().detach().float()[0].max(), alpha=0.5, extent=[*xlim, *ylim])
-                fig.savefig('./result/{}_{}'.format(args.model, batch_idx))
+    with torch.no_grad():
+        for i, (X, y) in enumerate(test_loader):
+            if args.cuda:
+                X, y = X.cuda(), y.cuda()
+            X, y = Variable(X), Variable(y)
+
+            y_proba, y_hat, A = model(X)
+            loss = loss_fn(y_proba, y)
+            test_loss += loss.detach().cpu().item()
+            test_error += 1. - (y_hat == y).detach().cpu().count_nonzero().item()
+
+            if i < 100:
+                X = X.detach().cpu()[0]
+                A = A.detach().cpu()[0]
+                save_result(X, A, title=f'$y = {y.detach().cpu().int()[0]}, \\hat{{y}} = {y_hat.detach().cpu().int()[0]}$', filename='fig_{}'.format(i))
 
     test_error /= len(test_loader)
     test_loss /= len(test_loader)
 
-    print('\nTest Set, Loss: {:.4f}, Test error: {:.4f}'.format(test_loss.cpu().float(), test_error))
-    print(cnt, ac, wa)
+    print('Test Set, Loss: {:.4f}, Test error: {:.4f}'.format(test_loss, test_error))
+
+
+def save_result(X, A, title=None, path='./img/', filename='img', mean=torch.tensor([0.3081]), std=torch.tensor([0.1307])):
+    X = torchvision.utils.make_grid(X, nrow=2, padding=0)
+    X = X * std + mean
+    X = torch.permute(X, (1, 2, 0))
+    A = A.view(2, 2)
+
+    fig, ax = plt.subplots()
+    if title is not None:
+        fig.suptitle(title)
+    ax.axis('off')
+    ax.imshow(X)
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    ax.imshow(A, cmap='bwr', alpha=0.5, vmin=0., vmax=1., extent=[*xlim, *ylim])
+    fig.savefig(path + filename)
+    plt.close(fig)
 
 
 if __name__ == "__main__":
