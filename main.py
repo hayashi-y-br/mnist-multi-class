@@ -11,7 +11,7 @@ from torch.autograd import Variable
 import matplotlib.pyplot as plt
 
 from dataloader import MnistBags
-from model import Attention
+from model import Attention, Additive
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch MNIST bags Example')
@@ -36,7 +36,7 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--model', type=str, default='attention', help='Choose b/w attention and gated_attention')
-parser.add_argument('--batch_size', type=int, default=1, help='batch_size')
+parser.add_argument('--batch_size', type=int, default=4, help='batch_size')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -62,6 +62,8 @@ test_loader = data_utils.DataLoader(MnistBags(train=False),
 print('Init Model')
 if args.model=='attention':
     model = Attention()
+elif args.model=='additive':
+    model = Additive()
 if args.cuda:
     model.cuda()
 
@@ -125,7 +127,12 @@ def test():
             if i < 100:
                 X = X.detach().cpu()[0]
                 A = A.detach().cpu()[0]
-                save_result(X, A, title=f'$y = {y.detach().cpu().int()[0]}, \\hat{{y}} = {y_hat.detach().cpu().int()[0]}$', filename='fig_{}'.format(i))
+                if args.model == 'attention':
+                    save_result(X, A, title=f'$y = {y.detach().cpu().int()[0]}, \\hat{{y}} = {y_hat.detach().cpu().int()[0]}$', filename=f'img_{i}')
+                elif args.model == 'additive':
+                    A = torch.permute(A, (1, 0))
+                    for j in range(10):
+                        save_result(X, A[j], title=f'$y = {y.detach().cpu().int()[0]}, \\hat{{y}} = {y_hat.detach().cpu().int()[0]}, j = {j}$', filename=f'img_{i}_{j}')
 
     test_error /= len(test_loader)
     test_loss /= len(test_loader)
@@ -133,13 +140,13 @@ def test():
     print('Test Set, Loss: {:.4f}, Test error: {:.4f}'.format(test_loss, test_error))
 
 
-def save_result(X, A, title=None, path='./img/', filename='img', mean=torch.tensor([0.3081]), std=torch.tensor([0.1307])):
+def save_result(X, A, title=None, path=f'./img/{args.model}/', filename='img', mean=torch.tensor([0.3081]), std=torch.tensor([0.1307])):
     X = torchvision.utils.make_grid(X, nrow=2, padding=0)
     X = X * std + mean
     X = torch.permute(X, (1, 2, 0))
     A = A.view(2, 2)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(3.6, 4))
     if title is not None:
         fig.suptitle(title)
     ax.axis('off')
@@ -147,6 +154,8 @@ def save_result(X, A, title=None, path='./img/', filename='img', mean=torch.tens
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
     ax.imshow(A, cmap='bwr', alpha=0.5, vmin=0., vmax=1., extent=[*xlim, *ylim])
+    # ax.imshow(A, cmap='bwr', alpha=0.5, extent=[*xlim, *ylim])
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=0.9)
     fig.savefig(path + filename)
     plt.close(fig)
 
