@@ -114,6 +114,7 @@ def test():
     loss_fn = torch.nn.CrossEntropyLoss()
 
     with torch.no_grad():
+        cnt = np.zeros(10, dtype=int)
         for i, (X, y) in enumerate(test_loader):
             if args.cuda:
                 X, y = X.cuda(), y.cuda()
@@ -124,15 +125,21 @@ def test():
             test_loss += loss.detach().cpu().item()
             test_error += 1. - (y_hat == y).detach().cpu().count_nonzero().item()
 
-            if i < 100:
+            j = y.detach().cpu().int()[0]
+            k = cnt[j]
+            if k < 10:
+            # if i < 10:
                 X = X.detach().cpu()[0]
                 A = A.detach().cpu()[0]
                 if args.model == 'attention':
-                    save_result(X, A, title=f'$y = {y.detach().cpu().int()[0]}, \\hat{{y}} = {y_hat.detach().cpu().int()[0]}$', filename=f'img_{i}')
+                    save_result(X, A, title=f'$y = {y.detach().cpu().int()[0]}, \\hat{{y}} = {y_hat.detach().cpu().int()[0]}$', filename=f'img_{j}_{k}')
+                    # save_result(X, A, title=f'$y = {y.detach().cpu().int()[0]}, \\hat{{y}} = {y_hat.detach().cpu().int()[0]}$', filename=f'img_{i}')
                 elif args.model == 'additive':
                     A = torch.permute(A, (1, 0))
-                    for j in range(10):
-                        save_result(X, A[j], title=f'$y = {y.detach().cpu().int()[0]}, \\hat{{y}} = {y_hat.detach().cpu().int()[0]}, j = {j}$', filename=f'img_{i}_{j}')
+                    for c in range(10):
+                        save_result(X, A[c], title=f'$y = {y.detach().cpu().int()[0]}, \\hat{{y}} = {y_hat.detach().cpu().int()[0]}, j = {c}$', filename=f'img_{j}_{k}_{c}')
+                        # save_result(X, A[j], title=f'$y = {y.detach().cpu().int()[0]}, \\hat{{y}} = {y_hat.detach().cpu().int()[0]}, j = {j}$', filename=f'img_{i}_{j}')
+                cnt[j] += 1
 
     test_error /= len(test_loader)
     test_loss /= len(test_loader)
@@ -140,7 +147,7 @@ def test():
     print('Test Set, Loss: {:.4f}, Test error: {:.4f}'.format(test_loss, test_error))
 
 
-def save_result(X, A, title=None, path=f'./img/{args.model}/', filename='img', mean=torch.tensor([0.3081]), std=torch.tensor([0.1307])):
+def save_result(X, A, title=None, path=f'./img_class/{args.model}/', filename='img', mean=torch.tensor([0.3081]), std=torch.tensor([0.1307])):
     X = torchvision.utils.make_grid(X, nrow=2, padding=0)
     X = X * std + mean
     X = torch.permute(X, (1, 2, 0))
@@ -153,8 +160,10 @@ def save_result(X, A, title=None, path=f'./img/{args.model}/', filename='img', m
     ax.imshow(X)
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
-    ax.imshow(A, cmap='bwr', alpha=0.5, vmin=0., vmax=1., extent=[*xlim, *ylim])
-    # ax.imshow(A, cmap='bwr', alpha=0.5, extent=[*xlim, *ylim])
+    if args.model == 'attention':
+        ax.imshow(A, cmap='bwr', alpha=0.5, extent=[*xlim, *ylim])
+    elif args.model == 'additive':
+        ax.imshow(A, cmap='bwr', alpha=0.5, vmin=0., vmax=1., extent=[*xlim, *ylim])
     fig.subplots_adjust(left=0, right=1, bottom=0, top=0.9)
     fig.savefig(path + filename)
     plt.close(fig)
